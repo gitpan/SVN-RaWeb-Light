@@ -1,0 +1,6 @@
+Revision history for Perl extension SVN::RaWeb::Light.
+
+0.2.0  Tue Nov 09 
+    First Stable Release.
+    Browse a single repository using a URL parameter.
+    The rev parameter.
