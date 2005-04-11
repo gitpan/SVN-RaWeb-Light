@@ -5,9 +5,10 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '0.3.2_00';
+$VERSION = '0.3.3_00';
 
 use CGI;
+use IO::Scalar;
 
 require SVN::Core;
 require SVN::Ra;
@@ -62,10 +63,7 @@ sub get_url_translations
 sub calc_rev_num
 {
     my $self = shift;
-    if (defined($self->rev_num()))
-    {
-        return;
-    }
+
     my $rev_param = $self->cgi()->param('rev');
 
     my ($rev_num, $url_suffix);
@@ -103,6 +101,98 @@ sub calc_path
     $self->path($path);
 }
 
+sub get_correct_node_kind
+{
+    my $self = shift;
+    return $self->should_be_dir() ? $SVN::Node::dir : $SVN::Node::file;
+}
+
+sub check_node_kind
+{
+    my $self = shift;
+    my $node_kind = shift;
+
+    if (($node_kind eq $SVN::Node::none) || ($node_kind eq $SVN::Node::unknown))
+    {
+        die +{
+            'callback' =>
+                sub {
+                    print $self->cgi()->header();
+                    print "<html><head><title>Does not exist!</title></head>";
+                    print "<body><h1>Does not exist!</h1></body></html>";
+                },
+        };        
+    }
+    elsif ($node_kind ne $self->get_correct_node_kind())
+    {
+        die +{
+            'callback' =>
+                sub {
+                    $self->path() =~ m{([^/]+)$};
+                    print $self->cgi()->redirect(
+                        ($node_kind eq $SVN::Node::dir) ? 
+                            "./$1/" :
+                            "../$1"
+                        );
+                },
+        };
+    }
+}
+
+sub process_dir
+{
+    my $self = shift;
+    my ($dir_contents, $fetched_rev) = 
+        $self->svn_ra()->get_dir($self->path(), $self->rev_num());
+    my $title = "Revision ". $self->rev_num() . ": /" . 
+        CGI::escapeHTML($self->path());
+    print $self->cgi()->header();
+    print "<html><head><title>$title</title></head>\n";
+    print "<body>\n";
+    print "<h2>$title</h2>\n";
+    my $url_translations = $self->get_url_translations();
+    if (@$url_translations)
+    {
+        print "<table border=\"1\">\n";
+        foreach my $trans (@$url_translations)
+        {
+            my $url = CGI::escapeHTML($trans->{'url'} . $self->path());
+            my $label = CGI::escapeHTML($trans->{'label'});
+            print "<tr><td><a href=\"$url\">$label</a></td></tr>\n";
+        }
+        print "</table>\n";
+    }
+    print "<ul>\n";
+    # If the path is the root - then we cannot have an upper directory
+    if ($self->path() ne "")
+    {
+        print "<li><a href=\"../" . $self->url_suffix() . "\">..</a></li>\n";
+    }
+    print map { my $escaped_name = CGI::escapeHTML($_); 
+        if ($dir_contents->{$_}->kind() eq $SVN::Node::dir)
+        {
+            $escaped_name .= "/";
+        }
+        "<li><a href=\"$escaped_name" . $self->url_suffix() . "\">$escaped_name</a></li>\n"
+        } sort { $a cmp $b } keys(%$dir_contents);
+    print "</ul>\n";
+    print "</body></html>\n";
+}
+
+sub process_file
+{
+    my $self = shift;
+
+    my $buffer = "";
+    my $fh = IO::Scalar->new(\$buffer);
+    my ($fetched_rev, $props)
+        = $self->svn_ra()->get_file($self->path(), $self->rev_num(), $fh);
+    print $self->cgi()->header( 
+        -type => ($props->{'svn:mime-type'} || 'text/plain')
+        );
+    print $buffer;
+}
+
 sub real_run
 {
     my $self = shift;
@@ -110,76 +200,18 @@ sub real_run
     $self->calc_rev_num();
     $self->calc_path();
 
-    my $node_kind = $self->svn_ra()->check_path($self->path(), $self->rev_num());
+    my $node_kind =
+        $self->svn_ra()->check_path($self->path(), $self->rev_num());
+
+    $self->check_node_kind($node_kind);
 
     if ($node_kind eq $SVN::Node::dir)
     {
-        if (! $self->should_be_dir())
-        {
-            $self->path() =~ m{([^/]+)$};
-            print $cgi->redirect("./$1/");
-            return;
-        }
-        my ($dir_contents, $fetched_rev) = 
-            $self->svn_ra()->get_dir($self->path(), $self->rev_num());
-        my $title = "Revision ". $self->rev_num() . ": /" . 
-            CGI::escapeHTML($self->path());
-        print $cgi->header();
-        print "<html><head><title>$title</title></head>\n";
-        print "<body>\n";
-        print "<h2>$title</h2>\n";
-        my $url_translations = $self->get_url_translations();
-        if (@$url_translations)
-        {
-            print "<table border=\"1\">\n";
-            foreach my $trans (@$url_translations)
-            {
-                my $url = CGI::escapeHTML($trans->{'url'} . $self->path());
-                my $label = CGI::escapeHTML($trans->{'label'});
-                print "<tr><td><a href=\"$url\">$label</a></td></tr>\n";
-            }
-            print "</table>\n";
-        }
-        print "<ul>\n";
-        # If the path is the root - then we cannot have an upper directory
-        if ($self->path() ne "")
-        {
-            print "<li><a href=\"../" . $self->url_suffix() . "\">..</a></li>\n";
-        }
-        print map { my $escaped_name = CGI::escapeHTML($_); 
-            if ($dir_contents->{$_}->kind() eq $SVN::Node::dir)
-            {
-                $escaped_name .= "/";
-            }
-            "<li><a href=\"$escaped_name" . $self->url_suffix() . "\">$escaped_name</a></li>\n"
-            } sort { $a cmp $b } keys(%$dir_contents);
-        print "</ul>\n";
-        print "</body></html>\n";
+        return $self->process_dir();
     }
     elsif ($node_kind eq $SVN::Node::file)
     {
-        if ($self->should_be_dir())
-        {
-            $self->path() =~ m{([^/]+)$};
-            print $cgi->redirect("../$1");
-            return;
-        }
-        
-        my $buffer = "";
-        open my $fh, ">", \$buffer;
-        my ($fetched_rev, $props)
-            = $self->svn_ra()->get_file($self->path(), $self->rev_num(), $fh);
-        print $cgi->header( 
-            -type => ($props->{'svn:mime-type'} || 'text/plain')
-            );
-        print $buffer;
-        close($fh);
-    }
-    else
-    {
-        print $cgi->header();
-        print "<html><head><title>Does not exist!</title></head>";
-        print "<body><h1>Does not exist!</h1></body></html>";
+        return $self->process_file();
     }
 }
 
@@ -192,10 +224,16 @@ sub run
         @ret = $self->real_run();
     };
 
-    print STDERR $@;
     if ($@)
     {
-        return $@->{'callback'}->();
+        if ((ref($@) eq "HASH") && (exists($@->{'callback'})))
+        {
+            return $@->{'callback'}->();
+        }
+        else
+        {
+            die $@;
+        }
     }
     else
     {
