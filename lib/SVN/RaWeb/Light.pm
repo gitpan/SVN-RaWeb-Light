@@ -5,12 +5,16 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '0.2.2';
+$VERSION = '0.3.2_00';
 
 use CGI;
 
 require SVN::Core;
 require SVN::Ra;
+
+use base 'Class::Accessor';
+
+__PACKAGE__->mk_accessors(qw(cgi path rev_num should_be_dir svn_ra url_suffix));
 
 # Preloaded methods go here.
 
@@ -30,35 +34,40 @@ sub initialize
     my %args = (@_);
     
     my $cgi = CGI->new();
-    $self->{'cgi'} = $cgi;
+    $self->cgi($cgi);
 
     my $svn_ra =
         SVN::Ra->new(
             'url' => $args{'url'},
         );
 
-    $self->{'svn_ra'} = $svn_ra;
+    $self->svn_ra($svn_ra);
+
+    my $url_translations = $args{'url_translations'} || [];
+    $self->{'url_translations'} = $url_translations;
 
     return $self;
 }
 
-sub run
+# TODO :
+# Create a way for the user to specify one extra url translation of his own.
+sub get_url_translations
 {
     my $self = shift;
-    my $cgi = $self->{'cgi'};
-    my $svn_ra = $self->{'svn_ra'};
-    my $path_info = $cgi->path_info();
-    my $path = $path_info;
-    if ($path =~ /\/\//)
+
+    return [ @{$self->{'url_translations'}} ];
+}
+
+# This function must be called before rev_num() and url_suffix() are valid.
+sub calc_rev_num
+{
+    my $self = shift;
+    if (defined($self->rev_num()))
     {
-        return $self->multi_slashes();
+        return;
     }
+    my $rev_param = $self->cgi()->param('rev');
 
-    $path =~ s!^/!!;
-    my $should_be_dir = (($path eq "") || ($path =~ s{/$}{}));
-
-    my $rev_param = $cgi->param('rev');
-    
     my ($rev_num, $url_suffix);
 
     # If a revision is specified - get the tree out of it, and persist with
@@ -70,47 +79,88 @@ sub run
     }
     else
     {
-        $rev_num = $svn_ra->get_latest_revnum();
+        $rev_num = $self->svn_ra()->get_latest_revnum();
         $url_suffix = "";
     }
+    
+    $self->rev_num($rev_num);
+    $self->url_suffix($url_suffix);
+}
 
-    my $node_kind = $svn_ra->check_path($path, $rev_num);
+sub calc_path
+{
+    my $self = shift;
+
+    my $path = $self->cgi()->path_info();
+    if ($path =~ /\/\//)
+    {
+        die +{ 'callback' => sub { $self->multi_slashes(); } };
+    }
+
+    $path =~ s!^/!!;
+
+    $self->should_be_dir(($path eq "") || ($path =~ s{/$}{}));
+    $self->path($path);
+}
+
+sub real_run
+{
+    my $self = shift;
+    my $cgi = $self->cgi();
+    $self->calc_rev_num();
+    $self->calc_path();
+
+    my $node_kind = $self->svn_ra()->check_path($self->path(), $self->rev_num());
 
     if ($node_kind eq $SVN::Node::dir)
     {
-        if (! $should_be_dir)
+        if (! $self->should_be_dir())
         {
-            $path =~ m{([^/]+)$};
+            $self->path() =~ m{([^/]+)$};
             print $cgi->redirect("./$1/");
             return;
         }
-        my ($dir_contents, $fetched_rev) = $svn_ra->get_dir($path, $rev_num);
-        my $title = "Revision $rev_num: /" . CGI::escapeHTML($path);
+        my ($dir_contents, $fetched_rev) = 
+            $self->svn_ra()->get_dir($self->path(), $self->rev_num());
+        my $title = "Revision ". $self->rev_num() . ": /" . 
+            CGI::escapeHTML($self->path());
         print $cgi->header();
         print "<html><head><title>$title</title></head>\n";
         print "<body>\n";
         print "<h2>$title</h2>\n";
+        my $url_translations = $self->get_url_translations();
+        if (@$url_translations)
+        {
+            print "<table border=\"1\">\n";
+            foreach my $trans (@$url_translations)
+            {
+                my $url = CGI::escapeHTML($trans->{'url'} . $self->path());
+                my $label = CGI::escapeHTML($trans->{'label'});
+                print "<tr><td><a href=\"$url\">$label</a></td></tr>\n";
+            }
+            print "</table>\n";
+        }
         print "<ul>\n";
         # If the path is the root - then we cannot have an upper directory
-        if ($path ne "")
+        if ($self->path() ne "")
         {
-            print "<li><a href=\"../$url_suffix\">..</a></li>\n";
+            print "<li><a href=\"../" . $self->url_suffix() . "\">..</a></li>\n";
         }
         print map { my $escaped_name = CGI::escapeHTML($_); 
             if ($dir_contents->{$_}->kind() eq $SVN::Node::dir)
             {
                 $escaped_name .= "/";
             }
-            "<li><a href=\"$escaped_name$url_suffix\">$escaped_name</a></li>\n"
+            "<li><a href=\"$escaped_name" . $self->url_suffix() . "\">$escaped_name</a></li>\n"
             } sort { $a cmp $b } keys(%$dir_contents);
         print "</ul>\n";
         print "</body></html>\n";
     }
     elsif ($node_kind eq $SVN::Node::file)
     {
-        if ($should_be_dir)
+        if ($self->should_be_dir())
         {
-            $path =~ m{([^/]+)$};
+            $self->path() =~ m{([^/]+)$};
             print $cgi->redirect("../$1");
             return;
         }
@@ -118,7 +168,7 @@ sub run
         my $buffer = "";
         open my $fh, ">", \$buffer;
         my ($fetched_rev, $props)
-            = $svn_ra->get_file($path, $rev_num, $fh);
+            = $self->svn_ra()->get_file($self->path(), $self->rev_num(), $fh);
         print $cgi->header( 
             -type => ($props->{'svn:mime-type'} || 'text/plain')
             );
@@ -133,13 +183,32 @@ sub run
     }
 }
 
+sub run
+{
+    my $self = shift;
+
+    my @ret;
+    eval {
+        @ret = $self->real_run();
+    };
+
+    print STDERR $@;
+    if ($@)
+    {
+        return $@->{'callback'}->();
+    }
+    else
+    {
+        return @ret;
+    }
+}
+
 sub multi_slashes
 {
     my $self = shift;
-    my $cgi = $self->{'cgi'};
-    print $cgi->header();
+    print $self->cgi()->header();
     print "<html><head><title>Wrong URL!</title></head>";
-    print "<body><h1>Wrong URL - Multiple Slashes in the URL." . 
+    print "<body><h1>Wrong URL - Multiple Adjacent Slashes (//) in the URL." . 
         "</h1></body></html>";
 }
 
