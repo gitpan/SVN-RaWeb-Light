@@ -5,7 +5,7 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '0.3.3_00';
+$VERSION = '0.4.0';
 
 use CGI;
 use IO::Scalar;
@@ -90,6 +90,16 @@ sub calc_path
     my $self = shift;
 
     my $path = $self->cgi()->path_info();
+    if ($path eq "")
+    {
+        die +{
+            'callback' =>
+            sub {
+                $self->cgi()->script_name() =~ m{([^/]+)$};
+                print $self->cgi()->redirect("./$1/");
+            },
+        };
+    }
     if ($path =~ /\/\//)
     {
         die +{ 'callback' => sub { $self->multi_slashes(); } };
