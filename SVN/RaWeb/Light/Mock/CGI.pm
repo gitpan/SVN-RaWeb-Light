@@ -27,8 +27,25 @@ sub initialize
     $self->{'params'} = $args{'params'};
     $self->{'path_info'} = $args{'path_info'};
     $self->{'script_name'} = $args{'script_name'};
+    $self->{'query_string'} = ($args{'query_string'} || "");
 
     $self->{'out'} = "";
+}
+
+sub to_array
+{
+    my $v = shift;
+    if (!defined($v))
+    {
+        return ();
+    }
+    return ((ref($v) eq "ARRAY") ? (@$v) : ($v));
+}
+
+sub first_elem
+{
+    my $v = shift;
+    return ((ref($v) eq "ARRAY") ? $v->[0] : $v);
 }
 
 sub param
@@ -36,7 +53,22 @@ sub param
     my $self = shift;
     my $param_id = shift;
 
-    return $self->{'params'}->{$param_id};
+    my $ret = $self->{'params'}->{$param_id};
+
+    if (wantarray())
+    {
+        return to_array($ret)
+    }
+    else
+    {
+        return first_elem($ret);
+    }
+}
+
+sub query_string
+{
+    my $self = shift;
+    return $self->{'query_string'};
 }
 
 sub path_info

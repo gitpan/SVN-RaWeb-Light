@@ -3,7 +3,7 @@
 use warnings;
 use strict;
 
-use Test::More tests => 13;
+use Test::More tests => 18;
 
 # We need to load the mocking modules first because they fill the 
 # namespaces and %INC. Otherwise, "use CGI" and "use SVN::*" will cause
@@ -62,8 +62,14 @@ use SVN::RaWeb::Light;
             'url' => "http://svn-i.shlomifish.org/svn/myrepos/",
             'url_translations' =>
             [
-                "svn://svn-i.nodomain.foo/hello/",
-                "file:///home/shlomi/svn/foo/",
+                {
+                    'url' => "svn://svn-i.nodomain.foo/hello/",
+                    'label' => "nodomain",
+                },
+                {
+                    'url' => "file:///home/shlomi/svn/foo/",
+                    'label' => "myfile",
+                },
             ],
         );
 
@@ -75,7 +81,16 @@ use SVN::RaWeb::Light;
     # TEST
     is_deeply(
         $url_trans, 
-        [ "svn://svn-i.nodomain.foo/hello/", "file:///home/shlomi/svn/foo/",],
+        [
+            {
+                'url' => "svn://svn-i.nodomain.foo/hello/",
+                'label' => "nodomain",
+            },
+            {
+                'url' => "file:///home/shlomi/svn/foo/",
+                'label' => "myfile",
+            },
+        ],
         "Checking for url_trans being correct"
     );
 }
@@ -90,6 +105,7 @@ use SVN::RaWeb::Light;
         {
             'rev' => "600",
         },
+        'query_string' => "rev=600",
     );
 
     reset_out_buffer();
@@ -164,7 +180,7 @@ use SVN::RaWeb::Light;
     );
 
     # TEST
-    ok((!$svn_ra_web->should_be_dir()), "Checking shoudl_be_dir()");
+    ok((!$svn_ra_web->should_be_dir()), "Checking should_be_dir()");
 }
 
 {
@@ -190,3 +206,97 @@ use SVN::RaWeb::Light;
     # TEST
     ok($svn_ra_web->should_be_dir(), "Checking should_be_dir()");
 }
+
+# Unit tests for calc_rev_num()
+
+# Checking that url_suffix() is valid if rev is not specified, but 
+# query_string is not empty.
+{
+    @CGI::new_params = 
+    (
+        'path_info' => "/trunk/build.txt", 
+        'params' =>
+        {
+            'trans_hide_all' => 1,
+        },
+        'query_string' => "trans_hide_all=1",
+    );
+
+    reset_out_buffer();
+
+    my $svn_ra_web = 
+        SVN::RaWeb::Light->new(
+            'url' => "http://svn-i.shlomifish.org/svn/myrepos/",
+        );
+
+    $svn_ra_web->calc_rev_num();
+
+    # TEST
+    is($svn_ra_web->url_suffix(), "?trans_hide_all=1", 
+        "Checking for url_suffix() when rev is speicified"
+    );
+}
+
+
+# Unit tests for get_url_suffix_with_extras
+
+sub my_url_suffix_test
+{
+    my %args = (@_);
+
+    @CGI::new_params =
+    (
+        'path_info' => "/trunk/hello/",
+        'params' =>
+        {
+        },
+        'query_string' => $args{'query_string'},
+    );
+
+    reset_out_buffer();
+
+    my $svn_ra_web =
+        SVN::RaWeb::Light->new(
+            'url' => "http://svn-i.shlomifish.org/svn/myrepos/",
+        );
+
+    is(
+        $svn_ra_web->get_url_suffix_with_extras(@{$args{'func_params'}}), 
+        $args{'result'},
+        $args{'msg'}
+    );
+}
+{
+    # TEST
+    my_url_suffix_test(
+        'query_string' => "",
+        'func_params' => [],
+        'result' => "",
+        'msg' => "Testing empty for both query string and additional",
+    );
+
+    # TEST
+    my_url_suffix_test(
+        'query_string' => "h=j&k=l",
+        'func_params' => [],
+        'result' => "?h=j&k=l",
+        'msg' => "Testing filled in query string and no additonal",
+    );
+
+    # TEST
+    my_url_suffix_test(
+        'query_string' => "",
+        'func_params' => ["panel=1"],
+        'result' => "?panel=1",
+        'msg' => "Testing empty query string and additional params",
+    );
+
+    # TEST
+    my_url_suffix_test(
+        'query_string' => "h=j&k=l",
+        'func_params' => ["panel=1"],
+        'result' => "?h=j&k=l;panel=1",
+        'msg' => "Testing empty query string and additional params",
+    );
+}
+
