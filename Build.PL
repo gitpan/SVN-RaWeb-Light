@@ -27,6 +27,7 @@ my $build = Test::Run::Builder->new(
         'strict' => 0,
         'SVN::Core' => 0,
         'SVN::Ra' => 0,
+        'perl' => '5.008',
         'vars' => 0,
         'warnings' => 0,
     },
@@ -43,7 +44,7 @@ my $build = Test::Run::Builder->new(
         'lib' => 0,
         'Module::Build' => '0.36',
     },
-    license => "bsd",
+    license => 'mit',
     dist_author => 'Shlomi Fish <shlomif@iglu.org.il>',
 );
 

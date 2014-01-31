@@ -5,7 +5,9 @@ use strict;
 
 use Test::More tests => 7;
 
-# We need to load the mocking modules first because they fill the 
+use lib './t/lib';
+
+# We need to load the mocking modules first because they fill the
 # namespaces and %INC. Otherwise, "use CGI" and "use SVN::*" will cause
 # the real modules to be loaded.
 use SVN::RaWeb::Light::Mock::CGI;
@@ -23,13 +25,13 @@ sub mytest
     my $results = $args{'results'};
     my $msg = $args{'msg'};
 
-    @CGI::new_params = 
+    @CGI::new_params =
     (
         'path_info' => "/trunk/hello/",
         'params' => $cgi_params,
     );
 
-    my $svn_raweb = 
+    my $svn_raweb =
         SVN::RaWeb::Light->new(
             'url_translations' => $url_trans
         );
@@ -40,7 +42,7 @@ sub mytest
         ),
         $results,
         $msg
-    );    
+    );
 }
 
 # TEST
@@ -95,7 +97,7 @@ mytest(
 # TEST
 mytest(
     'msg' => "With trans_hide_all CGI and some user-specified translations",
-    'cgi' => { 'trans_hide_all' => 1, 
+    'cgi' => { 'trans_hide_all' => 1,
         'trans_user' => [
             'MyUrl,https://yoohoo.yoo/hoo/',
             'svn://soohoo.mon/mandarin/',
@@ -154,7 +156,7 @@ mytest(
         {
             'label' => "Write",
             'url' => "svn+ssh://svnwrite.myhost.mytld/root/myroot/",
-        },    
+        },
         {
             'label' => "MyUrl",
             'url' => "https://yoohoo.yoo/hoo/",
@@ -197,7 +199,7 @@ mytest(
         {
             'label' => "Write",
             'url' => "svn+ssh://svnwrite.myhost.mytld/root/myroot/",
-        },    
+        },
         {
             'label' => "MyUrl",
             'url' => "https://yoohoo.yoo/hoo/",
@@ -266,7 +268,7 @@ mytest(
         {
             'label' => "Write",
             'url' => "svn+ssh://svnwrite.myhost.mytld/root/myroot/",
-        },    
+        },
         {
             'label' => "MyUrl",
             'url' => "https://yoohoo.yoo/hoo/",
